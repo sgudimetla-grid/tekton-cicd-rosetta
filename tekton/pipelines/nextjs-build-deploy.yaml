@@ -1,0 +1,140 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: nextjs-build-deploy
+  labels:
+    app.kubernetes.io/part-of: nextjs-pipeline
+spec:
+  description: |
+    End-to-end pipeline for building and deploying a Next.js application.
+    Clones the repo, installs dependencies, builds the app, creates a
+    container image, and deploys to Kubernetes.
+
+  params:
+    - name: repo-url
+      type: string
+      description: Git repository URL for the Next.js application.
+    - name: revision
+      type: string
+      default: main
+      description: Git branch, tag, or commit SHA.
+    - name: image-name
+      type: string
+      description: Container image name including registry (e.g., ghcr.io/org/nextjs-app).
+    - name: image-tag
+      type: string
+      default: latest
+      description: Tag for the container image.
+    - name: app-name
+      type: string
+      description: Application name for Kubernetes resources.
+    - name: deploy-namespace
+      type: string
+      default: default
+      description: Kubernetes namespace for deployment.
+    - name: node-version
+      type: string
+      default: "20"
+      description: Node.js major version.
+    - name: replicas
+      type: string
+      default: "2"
+      description: Number of deployment replicas.
+
+  workspaces:
+    - name: shared-workspace
+      description: Workspace shared across tasks for source code.
+    - name: docker-credentials
+      description: Docker registry credentials (config.json).
+
+  tasks:
+    - name: clone
+      taskRef:
+        name: git-clone
+      params:
+        - name: repo-url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: build-app
+      taskRef:
+        name: nextjs-install-build
+      runAfter:
+        - clone
+      params:
+        - name: node-version
+          value: $(params.node-version)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: build-image
+      taskRef:
+        name: build-push-image
+      runAfter:
+        - build-app
+      params:
+        - name: image-name
+          value: $(params.image-name)
+        - name: image-tag
+          value: $(params.image-tag)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+        - name: docker-credentials
+          workspace: docker-credentials
+
+    - name: deploy
+      taskRef:
+        name: kubernetes-deploy
+      runAfter:
+        - build-image
+      params:
+        - name: image-url
+          value: $(tasks.build-image.results.image-url)
+        - name: app-name
+          value: $(params.app-name)
+        - name: namespace
+          value: $(params.deploy-namespace)
+        - name: replicas
+          value: $(params.replicas)
+
+  finally:
+    - name: report-status
+      taskRef:
+        name: report-pipeline-status
+      params:
+        - name: pipeline-name
+          value: nextjs-build-deploy
+        - name: build-status
+          value: $(tasks.build-app.results.build-status)
+
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: report-pipeline-status
+  labels:
+    app.kubernetes.io/part-of: nextjs-pipeline
+spec:
+  description: Report final pipeline status (runs in the finally block).
+  params:
+    - name: pipeline-name
+      type: string
+    - name: build-status
+      type: string
+      default: unknown
+  steps:
+    - name: report
+      image: alpine:3.19
+      script: |
+        #!/usr/bin/env sh
+        echo "========================================="
+        echo "Pipeline: $(params.pipeline-name)"
+        echo "Build status: $(params.build-status)"
+        echo "Completed at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "========================================="

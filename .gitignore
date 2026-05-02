@@ -1,0 +1,12 @@
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local kubeconfig backups
+kubeconfig
+*.kubeconfig
+
+# Local-only debug output
+*.log

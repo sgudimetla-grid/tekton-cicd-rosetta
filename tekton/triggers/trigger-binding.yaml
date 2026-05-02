@@ -1,0 +1,20 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: github-push-binding
+  labels:
+    app.kubernetes.io/part-of: nextjs-pipeline
+spec:
+  params:
+    - name: git-repo-url
+      value: $(body.repository.clone_url)
+    - name: git-revision
+      value: $(body.after)
+    - name: git-branch
+      value: $(body.ref)
+    - name: commit-sha
+      value: $(body.head_commit.id)
+    - name: commit-message
+      value: $(body.head_commit.message)
+    - name: pusher-name
+      value: $(body.pusher.name)

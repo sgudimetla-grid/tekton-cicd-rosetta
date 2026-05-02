@@ -1,0 +1,104 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: kubernetes-deploy
+  labels:
+    app.kubernetes.io/part-of: nextjs-pipeline
+spec:
+  description: Deploy an application to Kubernetes using kubectl.
+  params:
+    - name: image-url
+      type: string
+      description: Full image URL including tag to deploy.
+    - name: app-name
+      type: string
+      description: Name of the application (used for deployment and service).
+    - name: namespace
+      type: string
+      default: default
+      description: Kubernetes namespace to deploy into.
+    - name: replicas
+      type: string
+      default: "2"
+      description: Number of pod replicas.
+    - name: container-port
+      type: string
+      default: "3000"
+      description: Port the Next.js application listens on.
+    - name: service-port
+      type: string
+      default: "80"
+      description: Port exposed by the Kubernetes service.
+  steps:
+    - name: deploy
+      image: alpine/k8s:1.29.4
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+
+        cat <<EOF | kubectl apply -f -
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: $(params.app-name)
+          namespace: $(params.namespace)
+          labels:
+            app: $(params.app-name)
+        spec:
+          replicas: $(params.replicas)
+          selector:
+            matchLabels:
+              app: $(params.app-name)
+          template:
+            metadata:
+              labels:
+                app: $(params.app-name)
+            spec:
+              containers:
+                - name: $(params.app-name)
+                  image: $(params.image-url)
+                  ports:
+                    - containerPort: $(params.container-port)
+                  readinessProbe:
+                    httpGet:
+                      path: /
+                      port: $(params.container-port)
+                    initialDelaySeconds: 10
+                    periodSeconds: 5
+                  livenessProbe:
+                    httpGet:
+                      path: /
+                      port: $(params.container-port)
+                    initialDelaySeconds: 15
+                    periodSeconds: 10
+                  resources:
+                    requests:
+                      cpu: 100m
+                      memory: 128Mi
+                    limits:
+                      cpu: 500m
+                      memory: 512Mi
+        EOF
+
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: $(params.app-name)
+          namespace: $(params.namespace)
+        spec:
+          selector:
+            app: $(params.app-name)
+          ports:
+            - protocol: TCP
+              port: $(params.service-port)
+              targetPort: $(params.container-port)
+          type: ClusterIP
+        EOF
+
+        echo "Waiting for rollout..."
+        kubectl rollout status deployment/$(params.app-name) \
+          -n $(params.namespace) --timeout=300s
+
+        echo "Deployment complete"
+        kubectl get pods -n $(params.namespace) -l app=$(params.app-name)

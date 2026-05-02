@@ -1,0 +1,59 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-push-image
+  labels:
+    app.kubernetes.io/part-of: nextjs-pipeline
+spec:
+  description: Build a container image using Kaniko and push it to a registry.
+  params:
+    - name: image-name
+      type: string
+      description: Full image name including registry (e.g., ghcr.io/org/app).
+    - name: image-tag
+      type: string
+      default: latest
+      description: Tag for the container image.
+    - name: dockerfile
+      type: string
+      default: Dockerfile
+      description: Path to the Dockerfile relative to the workspace root.
+    - name: build-context
+      type: string
+      default: "."
+      description: Build context directory relative to the workspace root.
+  workspaces:
+    - name: source
+      description: Workspace containing the application source and Dockerfile.
+    - name: docker-credentials
+      description: Workspace containing Docker config.json for registry auth.
+  results:
+    - name: image-digest
+      description: The digest of the built image.
+    - name: image-url
+      description: The full URL of the pushed image.
+  steps:
+    - name: build-and-push
+      image: gcr.io/kaniko-project/executor:v1.23.0
+      args:
+        - "--dockerfile=$(workspaces.source.path)/$(params.dockerfile)"
+        - "--context=$(workspaces.source.path)/$(params.build-context)"
+        - "--destination=$(params.image-name):$(params.image-tag)"
+        - "--digest-file=$(results.image-digest.path)"
+        - "--cache=true"
+        - "--snapshot-mode=redo"
+        - "--insecure"
+        - "--insecure-pull"
+      env:
+        - name: DOCKER_CONFIG
+          value: $(workspaces.docker-credentials.path)
+
+    - name: write-url
+      image: alpine:3.19
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+        IMAGE_URL="$(params.image-name):$(params.image-tag)"
+        echo -n "${IMAGE_URL}" > $(results.image-url.path)
+        echo "Image pushed: ${IMAGE_URL}"
+        echo "Digest: $(cat $(results.image-digest.path))"

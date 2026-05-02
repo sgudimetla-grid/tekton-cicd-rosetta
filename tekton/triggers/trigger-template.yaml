@@ -1,0 +1,67 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: nextjs-build-deploy-template
+  labels:
+    app.kubernetes.io/part-of: nextjs-pipeline
+spec:
+  params:
+    - name: git-repo-url
+      description: The Git repository URL from the push event.
+    - name: git-revision
+      description: The commit SHA that triggered the push.
+    - name: git-branch
+      description: The full ref of the branch (e.g., refs/heads/main).
+    - name: commit-sha
+      description: Short/full commit hash for image tagging.
+    - name: commit-message
+      description: Commit message for logging/tracing.
+    - name: pusher-name
+      description: Name of the person who pushed.
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: nextjs-push-
+        labels:
+          app.kubernetes.io/part-of: nextjs-pipeline
+          tekton.dev/pipeline: nextjs-build-deploy
+          triggers.tekton.dev/trigger: github-push
+        annotations:
+          tekton.dev/commit-sha: $(tt.params.commit-sha)
+          tekton.dev/commit-message: $(tt.params.commit-message)
+          tekton.dev/pushed-by: $(tt.params.pusher-name)
+      spec:
+        pipelineRef:
+          name: nextjs-build-deploy
+        params:
+          - name: repo-url
+            value: $(tt.params.git-repo-url)
+          - name: revision
+            value: $(tt.params.git-revision)
+          - name: image-name
+            value: "kind-registry:5000/nextjs-app"
+          - name: image-tag
+            value: $(tt.params.commit-sha)
+          - name: app-name
+            value: nextjs-app
+          - name: deploy-namespace
+            value: dev
+          - name: node-version
+            value: "20"
+          - name: replicas
+            value: "2"
+        workspaces:
+          - name: shared-workspace
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi
+          - name: docker-credentials
+            secret:
+              secretName: docker-registry-credentials
+        taskRunTemplate:
+          serviceAccountName: tekton-pipeline-sa

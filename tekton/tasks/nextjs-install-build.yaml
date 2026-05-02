@@ -1,0 +1,63 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: nextjs-install-build
+  labels:
+    app.kubernetes.io/part-of: nextjs-pipeline
+spec:
+  description: Install dependencies and build a Next.js application.
+  params:
+    - name: node-version
+      type: string
+      default: "20"
+      description: Node.js major version to use.
+    - name: build-command
+      type: string
+      default: "npm run build"
+      description: The build command to execute.
+  workspaces:
+    - name: source
+      description: Workspace containing the Next.js source code.
+  results:
+    - name: build-status
+      description: Whether the build succeeded or failed.
+  steps:
+    - name: install-dependencies
+      image: node:$(params.node-version)-alpine
+      workingDir: $(workspaces.source.path)
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+
+        if [ -f "package-lock.json" ]; then
+          npm ci
+        else
+          npm install
+        fi
+
+        echo "Dependencies installed successfully"
+
+    - name: lint
+      image: node:$(params.node-version)-alpine
+      workingDir: $(workspaces.source.path)
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+        if npm run lint --if-present 2>/dev/null; then
+          echo "Lint passed"
+        else
+          echo "Lint script not found or failed, continuing..."
+        fi
+
+    - name: build
+      image: node:$(params.node-version)-alpine
+      workingDir: $(workspaces.source.path)
+      env:
+        - name: NEXT_TELEMETRY_DISABLED
+          value: "1"
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+        $(params.build-command)
+        echo "success" > $(results.build-status.path)
+        echo "Next.js build completed successfully"

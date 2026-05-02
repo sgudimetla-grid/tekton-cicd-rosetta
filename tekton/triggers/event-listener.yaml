@@ -1,0 +1,36 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: github-push-listener
+  labels:
+    app.kubernetes.io/part-of: nextjs-pipeline
+spec:
+  serviceAccountName: tekton-triggers-sa
+  triggers:
+    - name: github-push-trigger
+      bindings:
+        - ref: github-push-binding
+      template:
+        ref: nextjs-build-deploy-template
+      interceptors:
+        - name: validate-github-webhook
+          ref:
+            name: github
+          params:
+            - name: secretRef
+              value:
+                secretName: github-webhook-secret
+                secretKey: webhook-secret
+            - name: eventTypes
+              value:
+                - push
+        - name: filter-main-branch
+          ref:
+            name: cel
+          params:
+            - name: filter
+              value: body.ref == 'refs/heads/main'
+            - name: overlays
+              value:
+                - key: short_sha
+                  expression: "body.head_commit.id.truncate(7)"
