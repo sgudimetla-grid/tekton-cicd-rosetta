@@ -10,3 +10,8 @@ kubeconfig
 
 # Local-only debug output
 *.log
+
+# Rosetta
+agents/TEMP/
+refsrc/
+!refsrc/INDEX.md
